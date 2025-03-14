@@ -1,0 +1,415 @@
+import React, { useState, useEffect } from 'react';
+
+const BalanceSheetGraph = () => {
+  // 日本語と英語のラベルマッピング
+  const labelMap = {
+    totalAssets: { ja: '資産合計', en: 'Total Assets' },
+    currentAssets: { ja: '流動資産', en: 'Current Assets' },
+    fixedAssets: { ja: '固定資産', en: 'Fixed Assets' },
+    currentLiabilities: { ja: '流動負債', en: 'Current Liabilities' },
+    fixedLiabilities: { ja: '固定負債', en: 'Fixed Liabilities' },
+    netAssets: { ja: '純資産', en: 'Net Assets' },
+    totalLiabilitiesEquity: { ja: '負債および資本合計', en: 'Total Liabilities & Equity' }
+  };
+
+  const [companyInfo, setCompanyInfo] = useState({
+    name: '',
+    ticker: '',
+    period: '',
+    unit: '億円'
+  });
+
+  const [inputs, setInputs] = useState({
+    totalAssets: '',
+    currentAssets: '',
+    fixedAssets: '',
+    currentLiabilities: '',
+    fixedLiabilities: '',
+    netAssets: '',
+  });
+  
+  const [graph, setGraph] = useState(null);
+  const [ratios, setRatios] = useState({
+    currentRatio: 0,
+    fixedRatio: 0,
+    fixedLongTermRatio: 0
+  });
+
+  // 数値を3桁カンマ区切りでフォーマットする関数
+  const formatNumber = (num) => {
+    if (num === '' || isNaN(Number(num))) return '';
+    return Number(num).toLocaleString();
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setInputs(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleCompanyInfoChange = (e) => {
+    const { name, value } = e.target;
+    setCompanyInfo(prev => ({ ...prev, [name]: value }));
+  };
+
+  // 負債および資本合計を計算
+  const totalLiabilitiesEquity = 
+    inputs.totalAssets === '' ? '' : inputs.totalAssets;
+
+  // Bloomberg URL生成
+  const getBloombergUrl = () => {
+    if (!companyInfo.ticker) return null;
+    
+    // 日本の上場企業（4桁の数字）の場合
+    if (/^\d{4}$/.test(companyInfo.ticker)) {
+      return `https://www.bloomberg.com/quote/${companyInfo.ticker}:JP`;
+    }
+    // その他の場合（英文ティッカーを想定）
+    else if (companyInfo.ticker.match(/^[A-Za-z]+$/)) {
+      return `https://www.bloomberg.com/quote/${companyInfo.ticker}:US`;
+    }
+    
+    return null;
+  };
+
+  // 負債・純資産の合計（グラフ生成用）
+  const calculateTotalLiabilitiesAndEquity = () => {
+    return Number(inputs.currentLiabilities) + Number(inputs.fixedLiabilities) + Number(inputs.netAssets);
+  };
+
+  // 財務比率を計算
+  const calculateFinancialRatios = () => {
+    const { currentAssets, fixedAssets, currentLiabilities, fixedLiabilities, netAssets } = inputs;
+    
+    // 各数値を数値型に変換
+    const ca = Number(currentAssets);
+    const fa = Number(fixedAssets);
+    const cl = Number(currentLiabilities);
+    const fl = Number(fixedLiabilities);
+    const na = Number(netAssets);
+    
+    // 流動比率（流動資産÷流動負債）
+    const currentRatio = cl > 0 ? (ca / cl) * 100 : 0;
+    
+    // 固定比率（固定資産÷純資産）
+    const fixedRatio = na > 0 ? (fa / na) * 100 : 0;
+    
+    // 固定長期比率（固定資産÷(固定負債＋純資産)）
+    const fixedLongTermRatio = (fl + na) > 0 ? (fa / (fl + na)) * 100 : 0;
+    
+    return {
+      currentRatio: currentRatio.toFixed(2),
+      fixedRatio: fixedRatio.toFixed(2),
+      fixedLongTermRatio: fixedLongTermRatio.toFixed(2)
+    };
+  };
+
+  const generateGraph = () => {
+    const { totalAssets, currentAssets, fixedAssets, currentLiabilities, fixedLiabilities, netAssets } = inputs;
+    const totalLiabilitiesAndEquity = calculateTotalLiabilitiesAndEquity();
+    
+    // 財務比率を計算
+    const financialRatios = calculateFinancialRatios();
+    setRatios(financialRatios);
+    
+    const svgContent = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 420">
+        <style>
+          text { font-family: Arial, sans-serif; font-size: 12px; }
+          .title { font-size: 16px; font-weight: bold; }
+          .subtitle { font-size: 14px; }
+          .ja { font-weight: bold; }
+          .en { font-size: 10px; }
+          .link { fill: blue; text-decoration: underline; cursor: pointer; }
+          .ratio-title { font-weight: bold; }
+        </style>
+        
+        <!-- タイトル情報 -->
+        <text x="200" y="20" text-anchor="middle" class="title">貸借対照表 / Balance Sheet</text>
+        <text x="200" y="40" text-anchor="middle" class="subtitle">${companyInfo.name} ${companyInfo.ticker ? `<${companyInfo.ticker}>` : ''} ${companyInfo.period}</text>
+        <text x="200" y="55" text-anchor="middle">(単位: ${companyInfo.unit})</text>
+        
+        <!-- デビット側（資産） -->
+        <rect x="50" y="70" width="150" height="${(currentAssets / totalAssets) * 200}" fill="#81C784" />
+        <rect x="50" y="${70 + (currentAssets / totalAssets) * 200}" width="150" height="${(fixedAssets / totalAssets) * 200}" fill="#4CAF50" />
+        
+        <text x="125" y="${70 + (currentAssets / totalAssets) * 100 - 10}" text-anchor="middle" fill="white" class="ja">${labelMap.currentAssets.ja}</text>
+        <text x="125" y="${70 + (currentAssets / totalAssets) * 100 + 5}" text-anchor="middle" fill="white" class="en">${labelMap.currentAssets.en}</text>
+        <text x="125" y="${70 + (currentAssets / totalAssets) * 100 + 20}" text-anchor="middle" fill="white">${formatNumber(currentAssets)}</text>
+        
+        <text x="125" y="${70 + (currentAssets / totalAssets) * 200 + (fixedAssets / totalAssets) * 100 - 10}" text-anchor="middle" fill="white" class="ja">${labelMap.fixedAssets.ja}</text>
+        <text x="125" y="${70 + (currentAssets / totalAssets) * 200 + (fixedAssets / totalAssets) * 100 + 5}" text-anchor="middle" fill="white" class="en">${labelMap.fixedAssets.en}</text>
+        <text x="125" y="${70 + (currentAssets / totalAssets) * 200 + (fixedAssets / totalAssets) * 100 + 20}" text-anchor="middle" fill="white">${formatNumber(fixedAssets)}</text>
+        
+        <!-- クレジット側（負債・純資産） -->
+        <rect x="200" y="70" width="150" height="${(currentLiabilities / totalLiabilitiesAndEquity) * 200}" fill="#E57373" />
+        <rect x="200" y="${70 + (currentLiabilities / totalLiabilitiesAndEquity) * 200}" width="150" height="${(fixedLiabilities / totalLiabilitiesAndEquity) * 200}" fill="#F44336" />
+        <rect x="200" y="${70 + ((Number(currentLiabilities) + Number(fixedLiabilities)) / totalLiabilitiesAndEquity) * 200}" width="150" height="${(Number(netAssets) / totalLiabilitiesAndEquity) * 200}" fill="#FFC107" />
+        
+        <text x="275" y="${70 + (currentLiabilities / totalLiabilitiesAndEquity) * 100 - 10}" text-anchor="middle" fill="white" class="ja">${labelMap.currentLiabilities.ja}</text>
+        <text x="275" y="${70 + (currentLiabilities / totalLiabilitiesAndEquity) * 100 + 5}" text-anchor="middle" fill="white" class="en">${labelMap.currentLiabilities.en}</text>
+        <text x="275" y="${70 + (currentLiabilities / totalLiabilitiesAndEquity) * 100 + 20}" text-anchor="middle" fill="white">${formatNumber(currentLiabilities)}</text>
+        
+        <text x="275" y="${70 + (currentLiabilities / totalLiabilitiesAndEquity) * 200 + (fixedLiabilities / totalLiabilitiesAndEquity) * 100 - 10}" text-anchor="middle" fill="white" class="ja">${labelMap.fixedLiabilities.ja}</text>
+        <text x="275" y="${70 + (currentLiabilities / totalLiabilitiesAndEquity) * 200 + (fixedLiabilities / totalLiabilitiesAndEquity) * 100 + 5}" text-anchor="middle" fill="white" class="en">${labelMap.fixedLiabilities.en}</text>
+        <text x="275" y="${70 + (currentLiabilities / totalLiabilitiesAndEquity) * 200 + (fixedLiabilities / totalLiabilitiesAndEquity) * 100 + 20}" text-anchor="middle" fill="white">${formatNumber(fixedLiabilities)}</text>
+        
+        <text x="275" y="${70 + ((Number(currentLiabilities) + Number(fixedLiabilities)) / totalLiabilitiesAndEquity) * 200 + (Number(netAssets) / totalLiabilitiesAndEquity) * 100 - 10}" text-anchor="middle" fill="white" class="ja">${labelMap.netAssets.ja}</text>
+        <text x="275" y="${70 + ((Number(currentLiabilities) + Number(fixedLiabilities)) / totalLiabilitiesAndEquity) * 200 + (Number(netAssets) / totalLiabilitiesAndEquity) * 100 + 5}" text-anchor="middle" fill="white" class="en">${labelMap.netAssets.en}</text>
+        <text x="275" y="${70 + ((Number(currentLiabilities) + Number(fixedLiabilities)) / totalLiabilitiesAndEquity) * 200 + (Number(netAssets) / totalLiabilitiesAndEquity) * 100 + 20}" text-anchor="middle" fill="white">${formatNumber(netAssets)}</text>
+        
+        <!-- 合計 -->
+        <text x="125" y="300" text-anchor="middle" class="ja">${labelMap.totalAssets.ja}: ${formatNumber(totalAssets)}</text>
+        <text x="125" y="315" text-anchor="middle" class="en">${labelMap.totalAssets.en}</text>
+        
+        <text x="275" y="300" text-anchor="middle" class="ja">${labelMap.totalLiabilitiesEquity.ja}: ${formatNumber(totalLiabilitiesEquity)}</text>
+        <text x="275" y="315" text-anchor="middle" class="en">${labelMap.totalLiabilitiesEquity.en}</text>
+        
+        <!-- 財務比率 -->
+        <text x="200" y="345" text-anchor="middle" class="ratio-title">財務比率 / Financial Ratios</text>
+        <text x="200" y="365" text-anchor="middle">流動比率（流動資産÷流動負債）= ${financialRatios.currentRatio}%</text>
+        <text x="200" y="380" text-anchor="middle">固定比率（固定資産÷純資産）= ${financialRatios.fixedRatio}%</text>
+        <text x="200" y="395" text-anchor="middle">固定長期比率（固定資産÷(固定負債＋純資産)）= ${financialRatios.fixedLongTermRatio}%</text>
+        
+        ${getBloombergUrl() ? 
+          `<a href="${getBloombergUrl()}" target="_blank">
+            <text x="200" y="415" text-anchor="middle" class="link">Bloomberg情報を表示</text>
+           </a>` : ''}
+      </svg>
+    `;
+    
+    setGraph(svgContent);
+  };
+
+  useEffect(() => {
+    if (Object.values(inputs).every(value => value !== '')) {
+      generateGraph();
+    }
+  }, [inputs, companyInfo]);
+
+  return (
+    <div className="p-4 max-w-4xl mx-auto">
+      <h2 className="text-xl font-bold mb-4 text-center">貸借対照表グラフジェネレーター</h2>
+      
+      {/* 企業情報入力セクション */}
+      <div className="bg-gray-50 p-4 rounded mb-6 border">
+        <h3 className="text-lg font-bold mb-3">企業情報</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block mb-1">
+              <span className="font-bold">企業名</span>
+            </label>
+            <input
+              type="text"
+              name="name"
+              value={companyInfo.name}
+              onChange={handleCompanyInfoChange}
+              placeholder="例: トヨタ自動車"
+              className="border rounded px-2 py-1 w-full"
+            />
+          </div>
+          
+          <div>
+            <label className="block mb-1">
+              <span className="font-bold">証券コード &lt;ティッカー&gt;</span>
+              <br />
+              <span className="text-xs">4桁の数字または英文ティッカー</span>
+            </label>
+            <input
+              type="text"
+              name="ticker"
+              value={companyInfo.ticker}
+              onChange={handleCompanyInfoChange}
+              placeholder="例: 7203 または AAPL"
+              className="border rounded px-2 py-1 w-full"
+            />
+          </div>
+          
+          <div>
+            <label className="block mb-1">
+              <span className="font-bold">決算時期</span>
+            </label>
+            <input
+              type="text"
+              name="period"
+              value={companyInfo.period}
+              onChange={handleCompanyInfoChange}
+              placeholder="例: 2024年第2四半期"
+              className="border rounded px-2 py-1 w-full"
+            />
+          </div>
+          
+          <div>
+            <label className="block mb-1">
+              <span className="font-bold">単位</span>
+            </label>
+            <input
+              type="text"
+              name="unit"
+              value={companyInfo.unit}
+              onChange={handleCompanyInfoChange}
+              placeholder="例: 億円"
+              className="border rounded px-2 py-1 w-full"
+            />
+          </div>
+        </div>
+        
+        {getBloombergUrl() && (
+          <div className="mt-3 text-blue-600">
+            <a href={getBloombergUrl()} target="_blank" rel="noopener noreferrer">
+              Bloomberg情報を表示 ({companyInfo.ticker})
+            </a>
+          </div>
+        )}
+      </div>
+      
+      {/* 貸借対照表入力セクション */}
+      <div className="flex justify-between mb-6">
+        <div className="w-1/2 pr-4">
+          <h3 className="text-lg font-bold mb-2 text-center border-b pb-1 bg-blue-100">借方 (Debit)</h3>
+          <div className="space-y-4">
+            <div className="border p-2 rounded">
+              <label className="block mb-1">
+                <span className="font-bold">{labelMap.currentAssets.ja}</span>
+                <br />
+                <span className="text-xs">{labelMap.currentAssets.en}</span>
+              </label>
+              <input
+                type="number"
+                name="currentAssets"
+                value={inputs.currentAssets}
+                onChange={handleInputChange}
+                className="border rounded px-2 py-1 w-full"
+              />
+            </div>
+            
+            <div className="border p-2 rounded">
+              <label className="block mb-1">
+                <span className="font-bold">{labelMap.fixedAssets.ja}</span>
+                <br />
+                <span className="text-xs">{labelMap.fixedAssets.en}</span>
+              </label>
+              <input
+                type="number"
+                name="fixedAssets"
+                value={inputs.fixedAssets}
+                onChange={handleInputChange}
+                className="border rounded px-2 py-1 w-full"
+              />
+            </div>
+            
+            <div className="border p-2 rounded bg-gray-100">
+              <label className="block mb-1">
+                <span className="font-bold">{labelMap.totalAssets.ja}</span>
+                <br />
+                <span className="text-xs">{labelMap.totalAssets.en}</span>
+              </label>
+              <input
+                type="number"
+                name="totalAssets"
+                value={inputs.totalAssets}
+                onChange={handleInputChange}
+                className="border rounded px-2 py-1 w-full"
+              />
+            </div>
+          </div>
+        </div>
+        
+        <div className="w-1/2 pl-4">
+          <h3 className="text-lg font-bold mb-2 text-center border-b pb-1 bg-red-100">貸方 (Credit)</h3>
+          <div className="space-y-4">
+            <div className="border p-2 rounded">
+              <label className="block mb-1">
+                <span className="font-bold">{labelMap.currentLiabilities.ja}</span>
+                <br />
+                <span className="text-xs">{labelMap.currentLiabilities.en}</span>
+              </label>
+              <input
+                type="number"
+                name="currentLiabilities"
+                value={inputs.currentLiabilities}
+                onChange={handleInputChange}
+                className="border rounded px-2 py-1 w-full"
+              />
+            </div>
+            
+            <div className="border p-2 rounded">
+              <label className="block mb-1">
+                <span className="font-bold">{labelMap.fixedLiabilities.ja}</span>
+                <br />
+                <span className="text-xs">{labelMap.fixedLiabilities.en}</span>
+              </label>
+              <input
+                type="number"
+                name="fixedLiabilities"
+                value={inputs.fixedLiabilities}
+                onChange={handleInputChange}
+                className="border rounded px-2 py-1 w-full"
+              />
+            </div>
+            
+            <div className="border p-2 rounded">
+              <label className="block mb-1">
+                <span className="font-bold">{labelMap.netAssets.ja}</span>
+                <br />
+                <span className="text-xs">{labelMap.netAssets.en}</span>
+              </label>
+              <input
+                type="number"
+                name="netAssets"
+                value={inputs.netAssets}
+                onChange={handleInputChange}
+                className="border rounded px-2 py-1 w-full"
+              />
+            </div>
+            
+            <div className="border p-2 rounded bg-gray-100">
+              <label className="block mb-1">
+                <span className="font-bold">{labelMap.totalLiabilitiesEquity.ja}</span>
+                <br />
+                <span className="text-xs">{labelMap.totalLiabilitiesEquity.en}</span>
+              </label>
+              <input
+                type="number"
+                value={totalLiabilitiesEquity}
+                disabled
+                className="border rounded px-2 py-1 w-full bg-gray-50"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {graph && (
+        <div className="mt-4 border p-4 rounded bg-white" dangerouslySetInnerHTML={{ __html: graph }} />
+      )}
+      
+      {/* 財務比率表示 */}
+      {Object.values(inputs).every(value => value !== '') && (
+        <div className="mt-4 border p-4 rounded bg-gray-50">
+          <h3 className="text-lg font-bold mb-2">財務比率分析</h3>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2">
+              <div className="font-bold">流動比率（流動資産÷流動負債）：</div>
+              <div>{ratios.currentRatio}%</div>
+            </div>
+            <div className="grid grid-cols-2">
+              <div className="font-bold">固定比率（固定資産÷純資産）：</div>
+              <div>{ratios.fixedRatio}%</div>
+            </div>
+            <div className="grid grid-cols-2">
+              <div className="font-bold">固定長期比率（固定資産÷(固定負債＋純資産)）：</div>
+              <div>{ratios.fixedLongTermRatio}%</div>
+            </div>
+          </div>
+          <div className="mt-2 text-sm">
+            <p><strong>流動比率</strong>: 短期的な支払能力を示す指標。一般的に200%以上が望ましいとされる。</p>
+            <p><strong>固定比率</strong>: 固定資産をどの程度自己資本でまかなっているかを示す指標。100%以下が理想的。</p>
+            <p><strong>固定長期比率</strong>: 固定資産を安定した資金（固定負債と純資産）でどの程度まかなっているかを示す指標。100%以下が望ましい。</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default BalanceSheetGraph;
